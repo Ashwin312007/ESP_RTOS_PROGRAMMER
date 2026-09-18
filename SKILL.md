@@ -1,579 +1,532 @@
 ---
 name: ESP_RTOS_PROGRAMMER
-description: ESP32 FreeRTOS firmware engineering skill for deterministic multitasking, multicore task allocation, sensor acquisition, inter-task communication, control loops, odometry, sensor fusion, communications, debugging, and runtime verification across ESP32-family targets.
+description: General ESP32-family programming skill combining Arduino-style embedded development with FreeRTOS tasking, multicore support, peripherals, communications, libraries, timing, interrupts, memory, debugging, hardware safety, and verification.
 ---
 
 # ESP RTOS Programmer Skill
 
-ESP_RTOS_PROGRAMMER provides domain-specific engineering rules for ESP32-family firmware using FreeRTOS.
+ESP_RTOS_PROGRAMMER is a general-purpose ESP32-family firmware engineering skill. It covers normal embedded programming plus FreeRTOS and multicore execution. It is not tied to robotics, IMUs, odometry, sensor fusion, or any specific application.
 
-If a general workflow skill such as `Essential_Skill` is active, that skill controls planning, approval, execution orchestration, verification policy, and Git operations. `ESP_RTOS_PROGRAMMER` controls ESP32/FreeRTOS-specific architecture, task design, core allocation, synchronization, timing, implementation, debugging, and runtime verification.
+If a general workflow skill such as `Essential_Skill` is active, that skill controls planning, approval, orchestration, verification policy, and Git operations. This skill controls ESP/FreeRTOS-specific engineering.
 
 ---
 
 ## 1. Core Rules
 
-### Rule 1 — Identify the Exact ESP Target
+### Rule 1 — Identify the Exact Target
 
-Never assume every ESP32 is dual-core.
+Never assume all ESP chips are identical or dual-core.
 
-Determine from the project before implementation:
+Determine from the existing project where possible:
 
-- Exact chip/board: ESP32, ESP32-S2, S3, C2, C3, C5, C6, H2, P4, or other target
-- Number of available application cores
+- Exact board and SoC
+- ESP family/variant
 - CPU architecture
+- Number of usable cores
 - Arduino-ESP32 or ESP-IDF
-- Framework/core/IDF version
-- Build system: Arduino IDE, PlatformIO, ESP-IDF/CMake
-- Clock configuration when relevant
-- PSRAM availability
-- Flash size
-- Relevant peripherals and pins
+- Framework/version
+- Build system
+- Flash and PSRAM
+- Logic voltage
+- Relevant pins and peripherals
 
-Never pin a task to a core that does not exist.
+Never use a second core unless the selected target actually provides one.
 
 ### Rule 2 — Inspect Before Modification
 
-Inspect relevant project files before changing code:
+Inspect relevant files before changing code:
 
 ```text
 *.ino
-*.c
-*.cpp
 *.h
 *.hpp
+*.c
+*.cpp
 platformio.ini
 CMakeLists.txt
 sdkconfig
 sdkconfig.defaults
 partitions.csv
+library.properties
 ```
 
-Also inspect existing tasks, priorities, queues, mutexes, semaphores, interrupts, timers, buses, watchdog configuration, networking, and shared state.
+Also inspect existing libraries, pins, tasks, priorities, interrupts, timers, queues, mutexes, semaphores, buses, networking, memory configuration, and build flags.
 
-### Rule 3 — Design the Data Flow Before Creating Tasks
+Do not rewrite unrelated working code.
 
-Do not convert every function into a FreeRTOS task.
+### Rule 3 — Use RTOS Only Where It Helps
 
-First identify:
+Do not convert every function into a task.
+
+Use FreeRTOS tasks when independent timing, concurrency, blocking-operation isolation, workload separation, or multicore execution provides a real benefit.
+
+A simple application may still use `setup()` and `loop()`.
+
+### Rule 4 — Plan Work Before Core Assignment
+
+For each independent workload determine:
 
 ```text
-Input -> Acquisition -> Processing -> State Estimation -> Control -> Output
+Purpose
+Period or event
+Deadline
+Priority
+Blocking behavior
+Shared resources
+Stack requirement
+Core affinity if required
 ```
 
-Create separate tasks only where concurrency, independent timing, blocking I/O isolation, or workload separation provides a real benefit.
+Do not blindly use "Core 0 for X, Core 1 for Y".
 
-### Rule 4 — Real-Time Work Comes Before Background Work
+### Rule 5 — Hardware Safety First
 
-Classify work as:
+Verify voltage, GPIO current, pull resistors, level shifting, common ground, power capacity, driver requirements, flyback protection, analog ranges, and boot-sensitive pins.
 
-```text
-HARD/TIGHT TIMING
-CONTROL
-SENSOR ACQUISITION
-PROCESSING
-COMMUNICATION
-LOGGING
-BACKGROUND
-```
-
-Motor control, encoder handling, and deterministic sampling take precedence over telemetry, logging, displays, Wi-Fi, BLE, and other background work.
-
-### Rule 5 — Communicate; Do Not Share Carelessly
-
-Prefer explicit FreeRTOS communication primitives over unsynchronized global variables.
-
-Use:
-
-- Queues for ordered data transfer
-- Task notifications for lightweight one-to-one events
-- Mutexes for shared resources
-- Semaphores for synchronization/events
-- Event groups for multiple state/event bits
-- Stream/message buffers for suitable byte/message streams
-
-Do not add a mutex when ownership or message passing removes the shared-state problem entirely.
+Never drive high-current loads directly from GPIO.
 
 ---
 
 ## 2. Task Classification
 
-Classify the project into one or more categories:
+Classify the request into relevant categories:
 
 ```text
-BOARD_TARGET
-RTOS_ARCHITECTURE
-MULTICORE
-SENSOR_ACQUISITION
-ENCODER
-IMU
-ODOMETRY
-SENSOR_FUSION
-PID_CONTROL
-MOTOR_CONTROL
-ISR
+BOARD_CORE
+PROJECT_SETUP
+GPIO
+ADC
+DAC
+PWM
+LEDC
+TIMER
+INTERRUPT
+UART
 I2C
 SPI
-UART
+I2S
 CAN_TWAI
+USB
+SENSOR
+ACTUATOR
+MOTOR
+DISPLAY
+STORAGE
+SD
 WIFI
 BLE
-TELEMETRY
-STORAGE
+NETWORK
+ESP_NOW
+FREE_RTOS
+MULTICORE
+QUEUE
+MUTEX
+SEMAPHORE
+EVENT_GROUP
+TASK_NOTIFICATION
+STREAM_BUFFER
 WATCHDOG
 MEMORY
-POWER
+PSRAM
+LOW_POWER
 DEBUGGING
 OPTIMIZATION
+LIBRARY_EXISTING
+LIBRARY_CUSTOM
 ```
 
-Focus architecture and verification on active categories.
+Focus only on categories required by the task.
 
 ---
 
-## 3. Architecture Planning
+## 3. Project Discovery
 
-Before coding, define a task table:
+Establish:
 
 ```text
-Task | Purpose | Period/Event | Priority | Core affinity | Input | Output | Stack
+Board:
+SoC:
+Architecture:
+Available cores:
+Framework:
+Framework version:
+Build system:
+Flash:
+PSRAM:
+Libraries:
+Pins:
+Peripherals:
 ```
 
-For each task determine:
+For PlatformIO inspect `platformio.ini`.
 
-- Is a separate task actually required?
-- Periodic or event-driven?
-- Deadline and acceptable jitter
-- Worst expected execution time
-- Blocking operations
-- Input/output ownership
-- Priority
-- Stack requirement
-- Core affinity, if affinity is justified
+For ESP-IDF inspect `CMakeLists.txt`, component files and `sdkconfig`.
 
-Do not assign priorities merely by task name.
+For Arduino projects inspect the sketch, included libraries, board selection and core APIs.
+
+Do not silently change the target or framework.
 
 ---
 
-## 4. Multicore Rules
+## 4. Library Decision
 
-Use multiple cores to isolate workloads only when the selected ESP target supports them.
-
-Core assignment must consider:
-
-- Existing ESP-IDF/Arduino system tasks
-- Wi-Fi/Bluetooth workload
-- Interrupt routing
-- Peripheral ownership
-- Data dependencies
-- Cache/memory effects
-- Control-loop deadlines
-
-Do not assume "Core 0 = communications" and "Core 1 = control" is universally optimal.
-
-When Arduino-ESP32/ESP-IDF exposes core-affinity APIs, use them only when deterministic placement is useful. Otherwise allow the scheduler to schedule normally.
-
-A reasonable robotics architecture may resemble:
+Before adding a new non-core dependency or implementing a component driver, ask:
 
 ```text
-Encoder/IMU acquisition
-        |
-        v
-Sensor queue
-        |
-        v
-Odometry / EKF
-        |
-        v
-Robot state
-        |
-        v
-PID / motion control
-        |
-        v
-Motor output
-
-Telemetry/Wi-Fi/BLE runs independently at lower criticality.
+Do you want to use an existing library, or build a custom library?
 ```
 
-Treat this as an architecture pattern, not a fixed core map.
+If existing, prefer official vendor libraries or maintained libraries compatible with the exact ESP target/framework.
 
----
-
-## 5. Task Creation
-
-Before creating a task define:
-
-- Function
-- Priority
-- Stack
-- Scheduling period/event
-- Core affinity
-- Shutdown behavior
-- Watchdog behavior
-
-For pinned tasks, verify multicore support first.
-
-Avoid:
-
-- Busy loops
-- Tasks that never block/yield without justification
-- Excessive task count
-- Giant stacks without evidence
-- Tiny stacks without measurement
-- High-priority logging
-- Long blocking operations in high-priority tasks
-
----
-
-## 6. Deterministic Periodic Execution
-
-For periodic control/sampling, prefer deterministic scheduling such as `vTaskDelayUntil()` rather than accumulating delay relative to the end of each iteration.
-
-Conceptually:
+If custom, ask:
 
 ```text
-wake -> acquire/process/control -> block until next absolute period
+What exactly should the custom library do?
 ```
 
-Measure actual execution time and jitter when timing matters.
+Then define the smallest useful API.
 
-Do not claim a loop is 1 kHz merely because its nominal delay is 1 ms.
+This gate does not apply to intrinsic framework facilities such as GPIO, Serial, Wire, SPI, FreeRTOS primitives, or verified ESP framework APIs.
 
 ---
 
-## 7. Priorities
+## 5. FreeRTOS Architecture
 
-Higher priority is not automatically better.
+Before creating tasks, identify independent workloads and their data flow.
 
-Assign priorities from deadline/latency requirements.
-
-Typical relative ordering may be:
+Create a task table when the application is non-trivial:
 
 ```text
-Critical acquisition / control
-State estimation
-Normal sensor processing
-Communications
-Telemetry / logging
-Background
+Task | Purpose | Trigger/Period | Priority | Core | Stack | Shared Resources
 ```
 
-Change this ordering when the actual system requires it.
+Prefer the smallest number of tasks that cleanly meets the requirement.
 
-Watch for priority inversion. Use a mutex with priority inheritance where appropriate for shared resources.
+Avoid busy loops and tasks that never block/yield without a real reason.
 
 ---
 
-## 8. Queues and Data Pipelines
+## 6. Multicore Programming
 
-Use queues when one task produces data consumed by another.
+First verify the exact target has multiple usable cores.
 
-For sensor pipelines define the message explicitly:
+Core affinity may be useful for:
 
-```cpp
-struct SensorFrame {
-    uint64_t timestamp_us;
-    float gyro_z;
-    float accel_x;
-    int32_t left_ticks;
-    int32_t right_ticks;
-};
-```
+- Separating time-sensitive and blocking workloads
+- Isolating heavy computation
+- Preventing one workload from disturbing another
+- Meeting measured timing requirements
 
-Messages should carry enough timing/context to process measurements correctly.
+Do not pin tasks merely because core pinning exists.
 
-For high-rate data, determine whether every sample must be preserved. If only the newest state matters, avoid building an ever-growing stale-data backlog.
+Account for framework/system tasks, networking stacks, interrupts, peripheral ownership and cross-core synchronization.
 
-Never hide queue overflow. Decide whether to block, overwrite, drop, or report it.
+When affinity is unnecessary, let the scheduler run the task normally.
 
 ---
 
-## 9. Shared State and Mutexes
+## 7. Task Priorities
 
-Use a mutex when multiple tasks genuinely need access to the same mutable resource.
+Assign priorities from timing requirements, not importance in human terms.
 
-Keep critical sections short.
+Higher-priority tasks can starve lower-priority tasks.
 
-Never hold a mutex while performing avoidable:
+Check for:
 
-- Network requests
-- Long delays
-- Serial logging
-- Long computations
-- Blocking peripheral waits
+- Starvation
+- Priority inversion
+- Long critical sections
+- Blocking high-priority tasks
+- Unbounded execution
 
-Avoid nested locks where possible. If multiple locks are necessary, establish a fixed acquisition order.
+Use mutex priority inheritance where appropriate.
 
 ---
 
-## 10. Interrupts and Encoder Acquisition
+## 8. Periodic Tasks and Timing
 
-Keep ISRs minimal.
+For periodic RTOS work, prefer deterministic scheduling such as `vTaskDelayUntil()` when a stable period matters.
 
-ISR work should normally:
+For simple non-RTOS timing, subtraction-based `millis()`/timestamp logic remains valid.
 
-```text
-capture event/count -> notify/store safely -> exit
-```
+Do not assume requested delay equals actual execution period.
 
-Do not perform filtering, EKF, PID, printing, I2C transactions, or other heavy work inside an ISR.
+Measure timing and jitter when they matter.
 
-For quadrature encoders, prefer suitable hardware pulse-counting/peripheral support when available and appropriate rather than unnecessarily servicing every edge in software.
+---
+
+## 9. Queues
+
+Use queues for safe ordered data transfer between tasks when appropriate.
+
+Define:
+
+- Item type
+- Queue length
+- Producer
+- Consumer
+- Timeout
+- Full-queue behavior
+
+Do not silently lose data. Decide whether to block, drop, overwrite, or report overflow.
+
+Do not use a queue when a simpler notification or direct ownership model is enough.
+
+---
+
+## 10. Task Notifications
+
+Use task notifications for lightweight task-to-task signaling when one task directly signals another and a full queue/semaphore is unnecessary.
+
+Choose the simplest primitive that preserves correctness.
+
+---
+
+## 11. Mutexes and Semaphores
+
+Use a mutex to protect genuinely shared resources.
+
+Use semaphores for synchronization/resource-counting patterns where appropriate.
+
+Keep protected sections short.
+
+Avoid holding locks across long delays, network operations, logging, or unnecessary computation.
+
+Avoid nested locks when possible. If unavoidable, establish consistent lock ordering.
+
+---
+
+## 12. Event Groups and Buffers
+
+Use event groups when a task needs to wait on combinations of state/event bits.
+
+Use stream/message buffers when their byte/message semantics fit the communication pattern.
+
+Do not introduce an RTOS primitive without a concrete need.
+
+---
+
+## 13. GPIO
+
+Verify mode, voltage, startup state, active level, pull requirements, boot/strapping behavior and board-specific restrictions.
+
+Do not assume printed board labels equal raw GPIO numbers.
+
+---
+
+## 14. ADC / DAC
+
+Verify ADC resolution, attenuation/reference behavior, valid pins, calibration and input voltage range.
+
+Do not assume Arduino Uno-style 10-bit ADC behavior.
+
+For targets with DAC hardware, verify that the exact SoC actually provides the required DAC capability.
+
+---
+
+## 15. PWM / LEDC
+
+Verify the active framework's PWM/LEDC API, channel/timer resources, frequency, resolution and pin capability.
+
+Do not assume `analogWrite()` behavior is identical across framework versions or ESP variants.
+
+---
+
+## 16. Interrupts
+
+Keep ISRs short.
+
+Avoid heavy computation, blocking calls, long loops, logging, bus transactions and allocation inside ISRs.
 
 Use ISR-safe FreeRTOS APIs when communicating from ISR context.
 
----
-
-## 11. IMU Acquisition
-
-For IMU tasks determine:
-
-- Interface and bus speed
-- Sensor output data rate
-- Required sampling frequency
-- Timestamp source
-- Calibration/bias handling
-- FIFO usage when supported
-- Units and coordinate frame
-- Bus ownership
-
-Do not filter away real robot dynamics merely to make values look visually smooth.
-
-Sensor acquisition and sensor fusion are separate responsibilities.
+Reason about atomicity; `volatile` alone is not synchronization.
 
 ---
 
-## 12. Wheel Odometry
+## 17. Timers
 
-For differential-drive wheel odometry establish:
+Distinguish between:
 
-```text
-ticks_per_revolution
-wheel_radius
-wheel_separation
-gear_ratio
-encoder_location
-sign convention
-sample interval
-```
+- FreeRTOS software timers
+- ESP timer facilities
+- Hardware timers
 
-Compute wheel displacement from encoder deltas, then update robot motion using the selected kinematic model.
+Choose based on required precision, execution context and workload.
 
-Use timestamps rather than assuming every loop executed at exactly its requested period.
-
-Validate straight-line distance and commanded rotations physically.
+Do not run long operations from timer callbacks.
 
 ---
 
-## 13. Sensor Fusion
+## 18. UART
 
-Do not confuse a path-tracking controller with a state estimator.
+Verify UART instance, baud rate, pins, buffering and USB-serial behavior.
 
-Examples:
+For asynchronous streams, handle partial packets and buffer limits.
 
-```text
-EKF / Kalman family -> state estimation / sensor fusion
-Stanley             -> path tracking controller
-PID                 -> feedback control
-```
-
-For encoder + IMU fusion, define:
-
-- State vector
-- Process model
-- Measurement model
-- Coordinate frames
-- Measurement covariance
-- Process covariance
-- Sensor rates
-- Timestamp alignment
-- Bias assumptions
-
-Do not tune an EKF by blindly changing matrices until output appears smooth.
-
-Check sensor calibration, units, timestamps, frames, encoder scale, and noise statistics first.
+If multiple tasks access one UART, establish clear ownership or synchronization.
 
 ---
 
-## 14. Control Loops
+## 19. I2C
 
-Keep control loops deterministic.
+Verify SDA/SCL pins, pull-ups, voltage, speed, address and bus instance.
 
-For PID or other controllers:
+If multiple tasks access one I2C bus, use controlled ownership or synchronization.
 
-- Use measured/known `dt`
-- Define saturation
-- Handle integral windup
-- Define safe startup state
-- Define sensor-timeout behavior
-- Define actuator limits
-- Separate controller computation from telemetry
-
-A communications stall must not freeze motor control.
+Do not assume every ESP board uses the same default pins.
 
 ---
 
-## 15. I2C/SPI/UART/CAN Ownership
+## 20. SPI
 
-Avoid uncontrolled access to the same peripheral from multiple tasks.
+Verify MOSI/MISO/SCK/CS, mode, frequency, bit order and device-specific requirements.
 
-Prefer one of:
+Coordinate shared-bus access correctly.
 
-```text
-single owner task + queue
-mutex-protected shared driver
-separate hardware peripheral instances
-```
-
-Choose the simplest valid design.
-
-For CAN/TWAI, UART, and high-rate buses, account for buffering and backpressure.
+Do not leave multiple chip-select lines active unintentionally.
 
 ---
 
-## 16. Wi-Fi and BLE
+## 21. CAN / TWAI, I2S and Other Peripherals
 
-Treat networking as non-deterministic unless proven otherwise.
+Verify exact SoC peripheral availability and framework API before use.
 
-Do not place time-critical motor control or sensor timing behind a network operation.
+Check pins, clocks, DMA/buffering, interrupts and resource conflicts.
 
-Avoid blocking reconnection loops.
-
-Prefer network tasks that consume robot state asynchronously and publish commands/events through controlled interfaces.
+Do not assume a peripheral exists across the entire ESP32 family.
 
 ---
 
-## 17. Watchdogs
+## 22. Wi-Fi, BLE, ESP-NOW and Networking
 
-Do not disable watchdogs merely to hide a scheduling bug.
+Use the APIs appropriate to the exact framework/version.
 
-When a watchdog triggers, investigate:
+Avoid blocking connection/reconnection loops that freeze unrelated application work.
 
-- Non-yielding loops
-- Excessive critical sections
-- Deadlocks
-- Blocking high-priority tasks
-- CPU starvation
-- Long interrupt handlers
-- Unexpected computation time
+Keep credentials out of public repositories unless explicitly requested.
 
-Only change watchdog configuration when the required execution model justifies it.
+Remember networking introduces background/system workload. Account for it before making timing or core-affinity assumptions.
 
 ---
 
-## 18. Memory and Stack
+## 23. Storage
 
-For every important task inspect stack headroom during runtime when possible.
+For flash, NVS, EEPROM emulation, SPIFFS/LittleFS, SD or other storage:
 
-Monitor:
+- Verify selected storage mechanism
+- Handle initialization failure
+- Avoid unnecessary flash writes
+- Consider wear where relevant
+- Synchronize access if multiple tasks can write
 
-- Task stack high-water marks
-- Heap
+Do not assume storage writes are instantaneous.
+
+---
+
+## 24. Memory, Heap, Stack and PSRAM
+
+Inspect:
+
+- Free heap
 - Largest free block
-- PSRAM use when relevant
-- Queue sizes
-- Large local arrays
+- Task stack high-water marks
+- Large globals/locals
 - Dynamic allocation
-- Memory leaks
+- Fragmentation
+- PSRAM availability and suitability
 
-Do not solve stack overflow by blindly multiplying every task stack size.
+Do not fix stack overflow by blindly increasing every stack.
 
-Remember that stack-size API units can differ between ESP-IDF-specific and vanilla FreeRTOS expectations; verify the active framework/API.
+Verify stack-size units for the actual API/framework.
 
----
-
-## 19. Timing Instrumentation
-
-For real-time firmware measure instead of guessing.
-
-Useful measurements:
-
-```text
-Task period
-Execution time
-Worst observed execution time
-Jitter
-Queue depth
-Dropped samples
-Control-loop overruns
-Sensor latency
-CPU/core load
-Stack headroom
-Heap
-```
-
-Use GPIO toggling plus an oscilloscope/logic analyzer for precise timing when useful.
+Do not assume PSRAM is available merely because the chip family can support it.
 
 ---
 
-## 20. Failure Handling
+## 25. Watchdogs
 
-Define behavior for:
+Do not disable watchdogs just to hide a scheduling problem.
 
-- IMU timeout
-- Encoder disconnect/failure
-- Queue full
-- Invalid sensor values
-- Motor driver fault
-- Communication loss
-- Task creation failure
-- Memory allocation failure
-- Watchdog event
+Investigate:
 
-For robots, loss of required control/sensing data should lead to an explicitly defined safe actuator state.
+- Non-yielding tasks
+- Deadlocks
+- Long critical sections
+- CPU starvation
+- Long callbacks/ISRs
+- Unexpected execution time
 
----
-
-## 21. Debugging Order
-
-Debug RTOS systems in this order unless evidence indicates otherwise:
-
-```text
-1. Exact ESP target/framework
-2. Power/wiring
-3. Build/configuration
-4. Individual peripheral operation
-5. Task creation and stack
-6. Task timing
-7. Queue/notification flow
-8. Shared-resource synchronization
-9. Priority/starvation issues
-10. Core-affinity issues
-11. Watchdog/deadlock behavior
-12. Memory/stack corruption
-13. Algorithm/state-estimation/control tuning
-14. Full-system load
-```
-
-Do not tune the EKF or PID before proving the measurements and timing are valid.
+Change watchdog configuration only when the application genuinely requires it.
 
 ---
 
-## 22. Implementation Rules
+## 26. Low Power
 
-- Make the smallest architecture that satisfies the timing requirements.
-- Preserve existing project structure unless change is required.
-- Do not create one task per sensor automatically.
-- Do not pin every task automatically.
-- Do not use shared globals as the default inter-task interface.
-- Do not add synchronization without a concrete shared-resource need.
-- Keep ISR work minimal.
-- Keep control independent from logging/networking.
-- Timestamp measurements near acquisition.
+For sleep/power tasks verify:
+
+- Required wake sources
+- Peripheral state
+- RTC-capable pins/resources
+- Data that must survive sleep
+- Network reconnection behavior
+- Framework/SoC-specific sleep APIs
+
+Do not assume all memory/peripheral state survives deep sleep.
+
+---
+
+## 27. Implementation Rules
+
+- Preserve existing project style.
+- Keep solutions simple.
+- Use RTOS only when useful.
+- Do not create one task per function.
+- Do not pin every task.
+- Prefer clear ownership over excessive locking.
+- Use timeouts where indefinite blocking is unsafe.
 - Check task/queue/semaphore creation results.
-- Use timeouts where blocking forever would make the robot unsafe.
-- Keep actuator startup states safe.
-- Prefer evidence-driven optimization.
+- Keep ISRs and callbacks short.
+- Avoid unnecessary dynamic allocation.
+- Do not use APIs from a different ESP variant/framework version without verification.
+- Do not optimize before measuring.
 
 ---
 
-## 23. Build Verification
+## 28. Debugging Order
 
-Use the project's actual toolchain:
+Unless evidence suggests otherwise:
 
 ```text
-Arduino IDE / arduino-cli
+1. Exact board/SoC/framework
+2. Power and wiring
+3. Build configuration
+4. Upload/serial connection
+5. Pin mapping
+6. Peripheral initialization
+7. Individual feature operation
+8. Task creation and stack
+9. Timing and blocking behavior
+10. Queue/notification flow
+11. Shared-resource synchronization
+12. Priority/starvation
+13. Core affinity
+14. Watchdog/deadlock
+15. Heap/stack corruption
+16. Full-system interaction
+```
+
+Do not redesign the application before proving the basic hardware and task behavior.
+
+---
+
+## 29. Verification
+
+Use the actual project toolchain:
+
+```text
+Arduino IDE
+arduino-cli
 PlatformIO
 ESP-IDF / idf.py
 ```
@@ -581,56 +534,51 @@ ESP-IDF / idf.py
 Verify:
 
 - Correct target
-- Successful compilation
-- No unresolved dependencies
+- Successful build
+- Dependencies resolve
 - Flash/RAM fit
 - No new relevant warnings
-- Correct FreeRTOS APIs for the selected framework/version
+- Upload succeeds when hardware is available
 
-Compilation proves syntax/build validity, not real-time behavior.
-
----
-
-## 24. Runtime Verification
-
-Verify relevant behavior on hardware where possible:
+Runtime verification may include:
 
 ```text
-Tasks       -> expected periods and priorities
-Cores       -> expected affinity/execution
-Queues      -> no unexplained drops/backlogs
-IMU         -> correct rate, units, calibration
-Encoders    -> correct counts/direction
-Odometry    -> measured distance/rotation agrees physically
-EKF         -> stable estimate without excessive lag
-Control     -> stable loop period and safe saturation
-Network     -> does not disturb control timing
-Watchdog    -> no starvation/resets
-Memory      -> stable heap and adequate stack headroom
+GPIO state
+PWM frequency/duty
+ADC values
+Bus traffic
+Task period
+Task execution time
+Core affinity
+Queue depth
+Stack headroom
+Heap
+Watchdog behavior
+Network recovery
+Peripheral operation
 ```
 
-If hardware is unavailable, distinguish static/build verification from runtime verification.
+Compilation alone does not prove runtime correctness.
 
 ---
 
-## 25. Completion Report
+## 30. Completion Report
 
 At completion report:
 
 ```text
 Goal
-ESP target
+Board / SoC
 Framework/version
-Task architecture
-Core allocation
-Priorities
-Communication primitives
+Libraries affected
+RTOS tasks affected
+Core allocation if used
 Files changed
+Pins/peripherals affected
 Build result
+Upload result
 Runtime verification
-Timing/jitter observations
-Stack/memory observations
-Remaining hardware checks
+Remaining warnings/checks
 ```
 
-Do not claim deterministic behavior without measurement.
+Do not claim success beyond available evidence.
